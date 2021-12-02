@@ -3,25 +3,45 @@
 # Inspired by Atari ST librarian shipped with the KMX-8
 
 import tkinter as tk
+import json
 
 chr_ht=25
+
+# Configuration data file is a dictionary with the following entries
+# inputs    : list of 8 input names
+# outputs   : list of 8 output names
+# patches   : list of
+#   name : string
+#   routing : list of 8 integers. 0 = "none", 1-8 = channel, 9 = merged
+# NOTE - input/output devices are not part of the patch because it's
+# not easy to swap the physical cables around.
+
+# Patch numbers are discontinuous
+valid_patches = list(range(1,9)) + list(range(10,19)) + list(range(20,29))
+
+# Connection range - the KMX-8 has 8 possible connection inputs and outputs
+con_range = range(0,8)
+
+configuration = {
+    'inputs' : [ 'PC','SQ-1+32','NordLead','Unused', 'ESI-32','DR-660','KeyStep','Wally'],
+    'outputs' : [ 'PC','SQ-1+32','NordLead','MicroBrute', 'ESI-32','DR-660','KeyStep','Wally' ],
+    }
+
+# initial patches. Note that some of these patches aren't actually addressable
+# by the KMX-8
+patches = [ { 'name' : ('Patch #' + str(i+1)),
+              'routing': [ 0 for j in con_range ] }
+        for i in range(0,30) ]
 
 class LibrarianFrame(tk.Frame):
     def __init__(self, master):
         super().__init__(master)
         self.master = master
 
-        # Create configuration data
-        self.patch_names = ['Unnamed Patch ' + str(x) for x in range(0,30)]
-        self.input_names = [
-            'PC','SQ-1+32','NordLead','Unused',
-            'ESI-32','DR-660','KeyStep','Wally']
-        self.output_names = [
-            'PC','SQ-1+32','NordLead','MicroBrute',
-            'ESI-32','DR-660','KeyStep','Wally' ]
-
         # Start with all outputs connected to nothing
-        self.routing = [0 for i in range(0,8)]
+        self.edit_patch = 0
+        self.routing = [0 for i in con_range]
+        self.lines = [None for i in con_range] 
 
         master.columnconfigure(1,weight=1)
 
@@ -29,14 +49,12 @@ class LibrarianFrame(tk.Frame):
         master.title("KMX-8 Librarian")
         master.geometry('400x320')
 
-        # Add some identification text (cosmetic)
-
         # Create the functional regions of the UI and populate them
         # with controls.
         self.patch_frame = tk.Frame(master)
         self.create_patch_select(self.patch_frame)
         self.patch_frame.grid(column=0,row=0)
- 
+
         self.patchbay_frame = tk.Frame(master)
         self.create_patchbay(self.patchbay_frame)
         self.patchbay_frame.grid(column=0,row=1)
@@ -61,21 +79,20 @@ class LibrarianFrame(tk.Frame):
 
     # Create the controls that drive the patch bay
     def create_patchbay(self,master):
-        rng = range(0,8)
         self.input_index = tk.IntVar()
-        self.input_labels = [tk.Label(master,text=self.input_names[i]) for i in rng]
+        self.input_labels = [tk.Label(master,text=configuration['inputs'][i]) for i in con_range]
         self.input_buttons = [
                 tk.Radiobutton(master,
                     text=str(i+1),
                     value=i,
                     variable=self.input_index)
-                for i in rng]
-        self.output_labels = [tk.Label(master,text=self.output_names[i]) for i in rng]
+                for i in con_range]
+        self.output_labels = [tk.Label(master,text=configuration['outputs'][i]) for i in con_range]
         self.output_buttons = [
                 tk.Button(master,
                     text=str(i+1),
                     command=self.do_output_button(i))
-                for i in rng]
+                for i in con_range]
         self.canvas = tk.Canvas(master, width=80, height=chr_ht*8)
 
         self.in_label=tk.Label(master,text='IN')
@@ -85,7 +102,7 @@ class LibrarianFrame(tk.Frame):
         self.in_label.grid(row=0,column=1)
         self.out_label.grid(row=0,column=3)
         self.canvas.grid(row=1,column=2,rowspan=8)
-        for r in rng:
+        for r in con_range:
             self.input_labels[r].grid(row=r+1,column=0,sticky="w") 
             self.input_buttons[r].grid(row=r+1,column=1,sticky="w")
             self.output_buttons[r].grid(row=r+1,column=3,sticky="e")
@@ -128,10 +145,10 @@ class LibrarianFrame(tk.Frame):
         return slot * chr_ht + chr_ht/2
 
     def create_connections(self):
-        self.lines = [None for i in range(0,8)]
+        self.lines = [None for i in con_range]
 
     def update_connections(self):
-        for out in range(0,8):
+        for out in con_range:
             self.update_connection(out)
 
     def update_connection(self,out):
@@ -159,10 +176,18 @@ class LibrarianFrame(tk.Frame):
 
 
     # Patch Select
+    # Saves edit buffer into current patch slot, then loads the new patch
     def do_change_patch(self):
-        print("Patch #" + self.patch_select.get())
-        # self.patch_name["text"] = str(self.patch_select.get())
-        self.patch_name["text"] = self.patch_names[int(self.patch_select.get())-1]
+        pn = int(self.patch_select.get())-1
+        patch = patches[pn]
+        if self.edit_patch != pn:
+            old_patch = patches[self.edit_patch]
+            for i in con_range:
+                old_patch['routing'][i] = self.routing[i]
+                self.routing[i] = patch['routing'][i]
+                self.update_connection(i)
+            self.edit_patch = pn
+        self.patch_name['text'] = patch['name']
 
 
     # Curried for ease of implementation
@@ -195,13 +220,11 @@ class LibrarianFrame(tk.Frame):
 
     def do_disk_save(self):
         print("TODO: disk save")
+        print(json.dumps(patches))
 
     def do_disk_save_config(self):
         print("TODO: disk save configuration")
-
-
-# Patch numbers are discontinuous
-valid_patches = list(range(1,9)) + list(range(10,19)) + list(range(20,29))
+        print(json.dumps(configuration,indent=2))
 
 # Create the appliation
 def main():
